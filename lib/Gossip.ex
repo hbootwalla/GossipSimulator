@@ -70,7 +70,7 @@ defmodule FullGossip do
       end
     end
   
-    def startFullGossip(count, totRepeat, agent_link) when count == totRepeat do
+    def startFullGossip(count, totRepeat, agent_link) when count > totRepeat do
       IO.puts ("I am done gossiping PID: -- "<> List.to_string :erlang.pid_to_list(self()));
       Process.exit(self(), :kill);
     end
@@ -117,9 +117,9 @@ defmodule FullGossip do
 end
   
 defmodule LineGossip do
-    def spawnLineActors(numOfNodes, nodeCount, prevPid) when nodeCount == 0 do
-      pid = spawn(__MODULE__, :startGossiping, [1, nil]);
-      spawnLineActors(numOfNodes, nodeCount+1, pid);
+    def spawnLineActors(numOfNodes, nodeCount, totRepeat, prevPid) when nodeCount == 0 do
+      pid = spawn(__MODULE__, :startGossiping, [1, totRepeat, nil]);
+      spawnLineActors(numOfNodes, nodeCount+1, totRepeat, pid);
       pid
     end
   
@@ -127,7 +127,7 @@ defmodule LineGossip do
              pid = spawn(__MODULE__, :startGossiping, [1, totRepeat,nil]);
              send(pid, {:add_neighbor, prevPid})
              send(prevPid, {:add_neighbor, pid})
-             spawnLineActors(numOfNodes, nodeCount+1,  pid);
+             spawnLineActors(numOfNodes, nodeCount+1, totRepeat, pid);
     end
   
     def spawnLineActors(numOfNodes, nodeCount, _,  _) when nodeCount == numOfNodes do
@@ -161,11 +161,11 @@ defmodule LineGossip do
           case neighborPid do
             nil -> IO.puts "I have no more neighbors PID: -- "<> List.to_string :erlang.pid_to_list ppid; Process.exit(ppid, :kill);
             _ -> send(neighborPid, {:gossip, ppid, message});
-                      spreadGossipPeriodically(topology, agent_link, ppid, message);
+                      spreadGossipPeriodically(agent_link, ppid, message);
             end
       end
     
-    def startGossiping(count, totRepeat, _ , _) when count > totRepeat do
+    def startGossiping(count, totRepeat, _ ) when count > totRepeat do
       IO.puts ("I am done gossiping PID: -- "<> List.to_string :erlang.pid_to_list(self()));
       Process.exit(self(), :kill);
       #GenServer.cast(server, {:termination_message, self()});
@@ -216,9 +216,9 @@ defmodule LineGossip do
         newMap = Map.put(mapInMap, cC, pid);
         map = Map.put(map, rC, newMap);      
         if(cC + 1 == power) do
-          spawn2DActors(numOfNodes, rC+1, 0, power, map)
+          spawn2DActors(numOfNodes, totRepeat, rC+1, 0, power, map)
         else
-          spawn2DActors(numOfNodes, rC, cC+1, power, map)
+          spawn2DActors(numOfNodes, totRepeat, rC, cC+1, power, map)
         end
       end
     end
