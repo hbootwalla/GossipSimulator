@@ -8,34 +8,53 @@ defmodule Project2.CLI do
     case algorithm do
       "gossip" ->
           case topology do
-            "full" -> list = FullGossip.spawnFullActors(String.to_integer(numOfNodes), 0, totRepeat,[]);
+            "full" -> list = FullGossip.spawnFullActors(String.to_integer(numOfNodes), 0, totRepeat,[], self());
                   for x <- 0..String.to_integer(numOfNodes)-1 do
                     newList = List.delete_at(list, x);
                     {pid, _} = List.pop_at(list, x);
                     send(pid, {:add_neighbors, newList});
                   end
                   pid = List.first(list);
-            "line" -> pid = LineGossip.spawnLineActors(String.to_integer(numOfNodes), 0, totRepeat, nil);
+
+            "line" -> pid = LineGossip.spawnLineActors(String.to_integer(numOfNodes), 0, totRepeat, nil, self);
+
             "2D" -> 
                     sqRt = trunc(Float.ceil(:math.sqrt(String.to_integer(numOfNodes))));
-                    map = TwoDGossip.spawn2DActors(String.to_integer(numOfNodes), totRepeat,0,0,sqRt, %{});
+                    map = TwoDGossip.spawn2DActors(String.to_integer(numOfNodes), totRepeat,0,0,sqRt, %{}, self);
                     TwoDGossip.setupNeighbors(map,0,0,sqRt);
                     pid = map[0][0]
             "2DImp" -> 
                     sqRt = trunc(Float.ceil(:math.sqrt(String.to_integer(numOfNodes))));
-                    {map,listOfPids} = TwoDImpGossip.spawn2DActors(String.to_integer(numOfNodes),totRepeat, 0,0,sqRt, %{}, []);
+                    {map,listOfPids} = TwoDImpGossip.spawn2DActors(String.to_integer(numOfNodes),totRepeat, 0,0,sqRt, %{}, [], self);
                     TwoDImpGossip.setupNeighbors(map,0,0,sqRt, listOfPids);
                     pid = map[0][0]
           end
           IO.puts(List.to_string(:erlang.pid_to_list(self())) <> " --> " <> List.to_string(:erlang.pid_to_list(pid)));
           send(pid, {:gossip, self(), "something"});
-      #"push-sum" ->
+      
+      "push-sum" -> 
+        case topology do
+          "full" -> list = FullPSGossip.spawnFullActors(String.to_integer(numOfNodes), 0, 1,[]);
+                    for x <- 0..String.to_integer(numOfNodes)-1 do
+                      newList = List.delete_at(list, x);
+                      {pid, _} = List.pop_at(list, x);
+                      send(pid, {:add_neighbors, newList});
+                    end
+                    pid = List.first(list);
+                   end
+        send(pid, {:push_sum, self(), {0,1}});
       end
-      keepAwake
+      keepAwake(1, String.to_integer(numOfNodes), :os.system_time(:microsecond))
   end  
 
-  def keepAwake do
-    keepAwake
+  def keepAwake(count, numOfNodes, startTime) do
+    if(count > numOfNodes) do
+      IO.puts (:os.system_time(:microsecond) - startTime);
+    else
+      receive do
+        {:dead_process} -> keepAwake(count+1, numOfNodes, startTime); 
+      end
+    end
   end
 end
 
