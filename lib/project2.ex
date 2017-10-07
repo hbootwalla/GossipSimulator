@@ -3,7 +3,7 @@ defmodule Project2.CLI do
   # Command Line arguments are passed in args list
   def main(args \\ []) do
     args_tuple = List.to_tuple args
-    {numOfNodes, topology, algorithm}  = args_tuple
+    {numOfNodes, topology, algorithm} = args_tuple
     totRepeat = 10;
     case algorithm do
       "gossip" ->
@@ -31,10 +31,10 @@ defmodule Project2.CLI do
           end
           IO.puts(List.to_string(:erlang.pid_to_list(self())) <> " --> " <> List.to_string(:erlang.pid_to_list(pid)));
           send(pid, {:gossip, self(), "something"});
-      
+          keepAwake(1, String.to_integer(numOfNodes), :os.system_time(:microsecond))
       "push-sum" -> 
         case topology do
-          "full" -> list = FullPSGossip.spawnFullActors(String.to_integer(numOfNodes), 0, 1,[]);
+          "full" -> list = FullPSGossip.spawnFullActors(String.to_integer(numOfNodes), 0, 1, [], self());
                     for x <- 0..String.to_integer(numOfNodes)-1 do
                       newList = List.delete_at(list, x);
                       {pid, _} = List.pop_at(list, x);
@@ -42,9 +42,9 @@ defmodule Project2.CLI do
                     end
                     pid = List.first(list);
                    end
-        send(pid, {:push_sum, self(), {0,1}});
-      end
-      keepAwake(1, String.to_integer(numOfNodes), :os.system_time(:microsecond))
+        send(pid, {:start_push_sum, self()});
+        keepAwakeForPushSum(1, String.to_integer(numOfNodes), :os.system_time(:microsecond), list)
+        end
   end  
 
   def keepAwake(count, numOfNodes, startTime) do
@@ -56,6 +56,21 @@ defmodule Project2.CLI do
       end
     end
   end
+
+  def keepAwakeForPushSum(count, numOfNodes, startTime, list) do
+    if(count > numOfNodes) do
+      IO.puts (:os.system_time(:microsecond) - startTime);
+    else
+      receive do
+        {:dead_process, pid} -> list = List.delete(list, pid);
+                                new_pid = Enum.random(list);
+                                send(new_pid, {:update_neighbors, List.delete(list, pid)})
+                                send(new_pid, {:start_push_sum, self()});
+                                keepAwake(count+1, numOfNodes, startTime); 
+      end
+    end
+  end
+
 end
 
 # IGNORE THE REST, I HAVE MODULARIZED IT
