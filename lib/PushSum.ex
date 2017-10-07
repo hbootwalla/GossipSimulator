@@ -32,6 +32,41 @@ defmodule FullPSAgent do
      end
 end
 
+defmodule TwoDPSAgent do
+  
+  def start_link(args \\ %{}) do
+    Agent.start_link(fn -> Map.put(Map.put(Map.new, :count, 0), :list, []) end)
+  end
+
+  def add_neighbors(agent_link, listOfPid) do
+    Agent.update(agent_link, fn map -> Map.put(map, :list, listOfPid) end);
+  end
+
+  def get_random_neighbor(agent_link) do
+    list_R = Agent.get(agent_link, fn map -> Map.get(map, :list) end)
+    # case list_R do
+    #   [] -> n_pid = nil;
+
+    #   list_R -> n_pid = Enum.random(list_R); 
+    #       unless Process.alive?(n_pid) do
+    #         Agent.update(agent_link, fn(list) -> List.delete(list_R, n_pid) end);
+    #         list_RU = Agent.get(agent_link, fn(list) -> list end)
+    #         n_pid = get_random_neighbor(agent_link);
+    #     end
+    #   end
+      n_pid = Enum.random(list_R);
+  end
+  
+  def get_count(agent_link) do
+    Agent.get(agent_link, fn map -> Map.get(map, :count) end)
+  end
+  
+  def add_count(agent_link) do
+   Agent.update(agent_link, fn map -> Map.put(map, :count, Map.get(map, :count)+1) end)
+  end
+
+
+end
 
   
 defmodule FullPSGossip do
@@ -78,8 +113,126 @@ defmodule FullPSGossip do
       end
     end
   end
+end
+
+  defmodule TwoDPSGossip do
+    def spawnFullActors(numOfNodes, nodeCount, pIndex, list)  do
+      if nodeCount != numOfNodes do
+        pid = spawn(__MODULE__, :startFullPushSum, [pIndex, 1, 0, nil]);
+        list = list ++ [pid];
+        spawnFullActors(numOfNodes, nodeCount + 1,pIndex+1, list)
+      else
+        list
+      end    
+    end
   
-    # def startFullPushSum(s,w, agent_link) when count > totRepeat do
+    def messageAllNodesToAddNeighbors(pid, list) do
+      newList = List.delete(list, pid)
+      send(pid, {:add_neighbors, list});
+    end
+  
+    def startFullPushSum(sVal, wVal, count, agent_link) do
+      receive do
+        {:add_neighbors, n_pid} ->  {:ok, agent_link} = TwoDPSAgent.start_link(n_pid);
+                                    TwoDPSGossip.startFullPushSum(sVal, wVal, count, agent_link);
+  
+        {:push_sum, ppid, {new_s, new_w}} ->  if(count == 3) do
+                                                IO.puts ("I am done gossiping PID: -- "<> List.to_string :erlang.pid_to_list(self()));
+                                                Process.exit(self(), :kill);
+                                              else  
+                                                IO.puts(List.to_string(:erlang.pid_to_list(ppid)) <> " --> " <> List.to_string(:erlang.pid_to_list(self())) <> " S: #{sVal + new_s}" <> " W: #{wVal}");
+                                                neighborPid = TwoDPSAgent.get_random_neighbor(agent_link);
+                                                case neighborPid do
+                                                    nil -> Process.exit(self(), :kill);
+                                                    _ -> send(neighborPid, {:push_sum, self(), {(sVal + new_s)/2, (wVal + new_w)/2}});
+                                                          # if count == 1 do
+                                                          #   spawn(__MODULE__, :spreadGossipPeriodically, [agent_link, self(), message]);
+                                                          # end
+                                                          end
+                                                if(((new_s/new_w) - (sVal/wVal)) <= :math.pow(10,-10)) do
+                                                  TwoDPSGossip.startFullPushSum((sVal + new_s)/2,(wVal + new_w)/2,count+1, agent_link);
+                                                else
+                                                  TwoDPSGossip.startFullPushSum((sVal + new_s)/2, (wVal + new_w)/2, count, agent_link);
+                                                end
+                                              end 
+      end
+    end
+    
+  end
+
+  defmodule TwoDImpPSGossip do
+    def spawnFullActors(numOfNodes, nodeCount, pIndex, list)  do
+      if nodeCount != numOfNodes do
+        pid = spawn(__MODULE__, :startFullPushSum, [pIndex, 1, 0, nil]);
+        list = list ++ [pid];
+        spawnFullActors(numOfNodes, nodeCount + 1,pIndex+1, list)
+      else
+        list
+      end    
+    end
+  
+    def messageAllNodesToAddNeighbors(pid, list) do
+      newList = List.delete(list, pid)
+      send(pid, {:add_neighbors, list});
+    end
+  
+    def startFullPushSum(sVal, wVal, count, agent_link) do
+      receive do
+        {:add_neighbors, n_pid} ->  {:ok, agent_link} = TwoDPSAgent.start_link(n_pid);
+              TwoDImpPSGossip.startFullPushSum(sVal, wVal, count, agent_link);
+  
+        {:push_sum, ppid, {new_s, new_w}} ->  if(count == 3) do
+                                                IO.puts ("I am done gossiping PID: -- "<> List.to_string :erlang.pid_to_list(self()));
+                                                Process.exit(self(), :kill);
+                                              else  
+                                                IO.puts(List.to_string(:erlang.pid_to_list(ppid)) <> " --> " <> List.to_string(:erlang.pid_to_list(self())) <> " S: #{sVal + new_s}" <> " W: #{wVal}");
+                                                neighborPid = TwoDPSAgent.get_random_neighbor(agent_link);
+                                                case neighborPid do
+                                                    nil -> Process.exit(self(), :kill);
+                                                    _ -> send(neighborPid, {:push_sum, self(), {(sVal + new_s)/2, (wVal + new_w)/2}});
+                                                          # if count == 1 do
+                                                          #   spawn(__MODULE__, :spreadGossipPeriodically, [agent_link, self(), message]);
+                                                          # end
+                                                          end
+                                                if(((new_s/new_w) - (sVal/wVal)) <= :math.pow(10,-10)) do
+                                                  TwoDImpPSGossip.startFullPushSum((sVal + new_s)/2,(wVal + new_w)/2,count+1, agent_link);
+                                                else
+                                                  TwoDImpPSGossip.startFullPushSum((sVal + new_s)/2, (wVal + new_w)/2, count, agent_link);
+                                                end
+                                              end 
+      end
+    end
+  end
+  
+   
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  # def startFullPushSum(s,w, agent_link) when count > totRepeat do
     #   IO.puts ("I am done gossiping PID: -- "<> List.to_string :erlang.pid_to_list(self()));
     #   Process.exit(self(), :kill);
     # end
