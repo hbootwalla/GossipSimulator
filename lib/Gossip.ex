@@ -561,4 +561,3 @@ defmodule TwoDImpGossip do
       end
     end
   end
-  
