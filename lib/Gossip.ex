@@ -7,25 +7,21 @@ defmodule FullAgent do
       Agent.start_link(fn -> Map.put(Map.new, :count, 0); end)
     end
   
-    # def add_neighbor(agent_link, neighbor_pid) do
-    #   Agent.update(agent_link, fn map -> Map.put(map, :list, [neighbor_pid | Map.get(map, :list)]) end)
-    # end
-  
-    def get_random_neighbor(agent_link) do
+   def get_random_neighbor(agent_link) do
       list_R = Agent.get(agent_link, fn map -> Map.get(map, :list) end)
-      # case list_R do
-      #   [] -> n_pid = nil;
-  
-      #   list_R -> n_pid = Enum.random(list_R);
-      #       unless Process.alive?(n_pid) do
-      #         Agent.update(agent_link, fn(list) -> List.delete(list_R, n_pid) end);
-      #         list_RU = Agent.get(agent_link, fn(list) -> list end)
-      #         n_pid = get_random_neighbor(agent_link);
-      #     end
-      #   end
-        n_pid = Enum.random(list_R)
+      case list_R do
+        [] -> []
+        _ -> n_pid = Enum.random(list_R) 
+      end
+    end
+
+    def get_all_neighbors(agent_link) do
+      Agent.get(agent_link, fn map -> Map.get(map,:list) end);
     end
   
+    def remove_neighbor(agent_link, n_pid) do
+      Agent.update(agent_link, fn map -> Map.put(map, :list, List.delete(Map.get(map, :list), n_pid)) end);
+    end
   
      def add_neighbors(agent_link, listOfPids) do
         Agent.update(agent_link, fn(map) -> Map.put(map, :list, listOfPids) end)
@@ -64,29 +60,44 @@ defmodule FullGossip do
       if agent_link == nil do
         {:ok, agent_link} = FullAgent.start_link;
       end
-      count = FullAgent.get_count(agent_link)
-      if(count < totRepeat) do
-        receive do
+      receive do
           {:add_neighbors, n_pid} ->  FullAgent.add_neighbors(agent_link, n_pid)
                                       startFullGossip(totRepeat, agent_link, main_pid);
-    
-          {:gossip, ppid, message} -> #IO.puts(List.to_string(:erlang.pid_to_list(ppid)) <> " --> " <> List.to_string(:erlang.pid_to_list(self())) <> " Count: #{count}");
-                                      neighborPid = FullAgent.get_random_neighbor(agent_link);
-                                      case neighborPid do
-                                          #nil -> send(main_pid, {:dead_process}); # Process.exit(self(), :kill);
-                                          _ ->   send(neighborPid, {:gossip, self(), message});
-                                                if count == 0 do
-                                                  spawn(__MODULE__, :spreadGossipPeriodically, [agent_link, totRepeat, self(), message, main_pid]);
-                                                end
-                                                FullAgent.add_count(agent_link)
-                                                startFullGossip(totRepeat,agent_link, main_pid); 
+        
+          {:remove_neighbor, n_pid} -> FullAgent.remove_neighbor(agent_link, n_pid); startFullGossip(totRepeat, agent_link, main_pid);
+
+          {:gossip, ppid, message} -> FullAgent.add_count(agent_link)
+                                      count = FullAgent.get_count(agent_link)
+                                      #IO.puts(List.to_string(:erlang.pid_to_list(ppid)) <> " --> " <> List.to_string(:erlang.pid_to_list(self())) <> " Count: #{count}");
+                                      
+                                      if count < totRepeat do
+                                        
+                                        neighborPid = FullAgent.get_random_neighbor(agent_link);
+                                        case neighborPid do
+                                            [] -> send(main_pid, {:dead_process});  Process.exit(self(), :kill);# doNothing;
+                                            _ ->   send(neighborPid, {:gossip, self(), message});
+                                                  if count == 1 do
+                                                    #send(main_pid, {:infected_once, self()});
+                                                    spawn(__MODULE__, :spreadGossipPeriodically, [agent_link, totRepeat, self(), message, main_pid]);
+
+                                                  end
+                                                  startFullGossip(totRepeat,agent_link, main_pid); 
+                                        end
+                                      else
+                                        #IO.puts ("I am done gossiping PID: -- "<> List.to_string :erlang.pid_to_list(self()));
+                                        neighbor_list = FullAgent.get_all_neighbors(agent_link)
+                                        if neighbor_list != [] do
+                                          Enum.each(neighbor_list, fn x -> send(x,{:remove_neighbor, self()}) end);
+                                        end
+                                        send(main_pid, {:dead_process});
+                                        doNothing;
                                       end
                                     end
-      else
+      
         #IO.puts ("I am done gossiping PID: -- "<> List.to_string :erlang.pid_to_list(self()));
-        send(main_pid, {:dead_process});
-        doNothing
-      end
+        #send(main_pid, {:dead_process});
+        #doNothing
+      
     end
   
     # def startFullGossip(count, totRepeat, agent_link, main_pid) when count > totRepeat do
@@ -103,12 +114,13 @@ defmodule FullGossip do
     end
     
     def spreadGossipPeriodically(agent_link,totRepeat, ppid, message, main_pid) do
+      Process.sleep(1);
       count = FullAgent.get_count(agent_link);
       if count < totRepeat do
         neighborPid = FullAgent.get_random_neighbor(agent_link);
             case neighborPid do
-                #nil -> send(main_pid, {:dead_process}); #Process.exit(self(), :kill);
-                _ ->   send(neighborPid, {:gossip, self(), message});
+                [] -> send(main_pid, {:dead_process});  Process.exit(self(), :kill); #doNothing;
+                _ ->   send(neighborPid, {:gossip, ppid, message});
                         spreadGossipPeriodically(agent_link, totRepeat, ppid, message, main_pid);
             end 
       else
@@ -126,25 +138,41 @@ end
       Agent.start_link(fn -> map = Map.put(Map.new, :count, 0); Map.put(map, :list, []) end)
     end
   
-    def add_neighbor(agent_link, pid, neighbor_pid) do
+    def add_neighbor(agent_link, neighbor_pid) do
       Agent.update(agent_link, fn map -> Map.put(map, :list, [neighbor_pid | Map.get(map, :list)]) end)
       
     end
   
+    # def get_random_neighbor(agent_link) do
+    #   list_R = Agent.get(agent_link, fn map -> Map.get(map, :list) end)
+    #   # case list_R do
+    #   #   [] -> n_pid = nil;
+  
+    #   #   list_R -> n_pid = Enum.random(list_R);
+    #   #       unless Process.alive?(n_pid) do
+    #   #         Agent.update(agent_link, fn(list) -> List.delete(list_R, n_pid) end);
+    #   #         list_RU = Agent.get(agent_link, fn(list) -> list end)
+    #   #         n_pid = List.first(list_RU)
+    #   #     end
+    #   #   end
+    #   #   n_pid
+    #   Enum.random(list_R);
+    # end
+
     def get_random_neighbor(agent_link) do
       list_R = Agent.get(agent_link, fn map -> Map.get(map, :list) end)
-      # case list_R do
-      #   [] -> n_pid = nil;
-  
-      #   list_R -> n_pid = Enum.random(list_R);
-      #       unless Process.alive?(n_pid) do
-      #         Agent.update(agent_link, fn(list) -> List.delete(list_R, n_pid) end);
-      #         list_RU = Agent.get(agent_link, fn(list) -> list end)
-      #         n_pid = List.first(list_RU)
-      #     end
-      #   end
-      #   n_pid
-      Enum.random(list_R);
+      case list_R do
+        [] -> []
+        _ -> n_pid = Enum.random(list_R) 
+      end
+    end
+
+    def get_all_neighbors(agent_link) do
+      Agent.get(agent_link, fn map -> Map.get(map,:list) end);
+    end
+
+    def remove_neighbor(agent_link, n_pid) do
+      Agent.update(agent_link, fn map -> Map.put(map, :list, List.delete(Map.get(map, :list), n_pid)) end);
     end
 
     def get_count(agent_link) do
@@ -174,51 +202,62 @@ defmodule LineGossip do
     def spawnLineActors(numOfNodes, nodeCount, _,  _, _) when nodeCount == numOfNodes do
     end
   
-    def startGossiping(totRepeat, agent_link, main_pid)  do
-    
-     if agent_link == nil do
-        {:ok, agent_link} = LineAgent.start_link
-     end
-    count = LineAgent.get_count(agent_link)
-    if count < totRepeat do
-     receive do
-          {:add_neighbor, n_pid} -> LineAgent.add_neighbor(agent_link, self(), n_pid);
-                                    startGossiping(totRepeat, agent_link, main_pid);
-  
-          {:gossip, ppid, message} -> #IO.puts(List.to_string(:erlang.pid_to_list(ppid)) <> " --> " <> List.to_string(:erlang.pid_to_list(self())) <> " Count: #{count}");
-                                      neighborPid = LineAgent.get_random_neighbor(agent_link);
-                                      case neighborPid do
-                                        #nil -> send(main_pid, {:dead_process}); #IO.puts "I have no more neighbors PID: -- "<> List.to_string :erlang.pid_to_list self(); Process.exit(self(), :kill);
-                                        _ -> send(neighborPid, {:gossip, self(), message});
-                                            if count == 1 do
-                                              spawn(__MODULE__, :spreadGossipPeriodically, [agent_link, self(), message,main_pid, totRepeat]);
-                                            end
-                                            LineAgent.add_count(agent_link)
-                                            startGossiping(totRepeat, agent_link, main_pid);
-                                      end
+    def startGossiping(totRepeat, agent_link, main_pid) do
+      if agent_link == nil do
+        {:ok, agent_link} = LineAgent.start_link;
       end
-    else
-      send(main_pid, {:dead_process});
-      #IO.puts ("I am done gossiping PID: -- "<> List.to_string :erlang.pid_to_list(self()));
-      doNothing
-    end
+      receive do
+          {:add_neighbor, n_pid} ->  LineAgent.add_neighbor(agent_link, n_pid)
+                                     startGossiping(totRepeat, agent_link, main_pid);
+    
+          {:gossip, ppid, message} -> LineAgent.add_count(agent_link)
+                                      count = LineAgent.get_count(agent_link)
+                                      #IO.puts(List.to_string(:erlang.pid_to_list(ppid)) <> " --> " <> List.to_string(:erlang.pid_to_list(self())) <> " Count: #{count}");
+                                      
+                                      if count < totRepeat do
+                                        
+                                        neighborPid = LineAgent.get_random_neighbor(agent_link);
+                                        case neighborPid do
+                                            [] -> send(main_pid, {:dead_process});  Process.exit(self(), :kill);
+                                            _ ->   send(neighborPid, {:gossip, self(), message});
+                                                  if count == 1 do
+                                                    #send(main_pid, {:infected_once, self()});
+                                                    spawn(__MODULE__, :spreadGossipPeriodically, [agent_link, totRepeat, self(), message, main_pid]);
+                                                  end
+                                                  startGossiping(totRepeat,agent_link, main_pid); 
+                                        end
+                                      else
+                                        #IO.puts ("I am done gossiping PID: -- "<> List.to_string :erlang.pid_to_list(self()));
+                                        neighbor_list = LineAgent.get_all_neighbors(agent_link)
+                                        if neighbor_list != [] do
+                                          Enum.each(neighbor_list, fn x -> send(x,{:remove_neighbor, self()}) end);
+                                        end
+                                        send(main_pid, {:dead_process});
+                                        doNothing;
+                                      end
+        end
+      
+        #IO.puts ("I am done gossiping PID: -- "<> List.to_string :erlang.pid_to_list(self()));
+        #send(main_pid, {:dead_process});
+        #doNothing
+      
     end
     
   
-    def spreadGossipPeriodically(agent_link, ppid, message,main_pid, totRepeat) do
-      #Process.sleep(100);
-      count = LineAgent.get_count(agent_link)
-      if count < totRepeat do 
-        neighborPid = LineAgent.get_random_neighbor(agent_link)
-          case neighborPid do
-            #nil -> send(main_pid, {:dead_process}); #IO.puts "I have no more neighbors PID: -- "<> List.to_string :erlang.pid_to_list ppid; Process.exit(ppid, :kill);
-            _ -> send(neighborPid, {:gossip, ppid, message});
-                      spreadGossipPeriodically(agent_link, ppid, message, main_pid, totRepeat);
-            end
-          else
-            Process.exit(self(), :kill);
-          end
-        end
+    def spreadGossipPeriodically(agent_link,totRepeat, ppid, message, main_pid) do
+      Process.sleep(1);
+      count = LineAgent.get_count(agent_link);
+      if count < totRepeat do
+        neighborPid = LineAgent.get_random_neighbor(agent_link);
+            case neighborPid do
+              [] -> send(main_pid, {:dead_process});  Process.exit(self(), :kill);
+                _ ->   send(neighborPid, {:gossip, ppid, message});
+                        spreadGossipPeriodically(agent_link, totRepeat, ppid, message, main_pid);
+            end 
+      else
+        Process.exit(self(), :kill);
+      end
+    end
     
     # def startGossiping(totRepeat, _ , main_pid) when count > totRepeat do
     #   send(main_pid, {:dead_process});
@@ -248,19 +287,35 @@ defmodule LineGossip do
       Agent.update(agent_link, fn map -> Map.put(map, :list, listOfPid) end);
     end
   
+    # def get_random_neighbor(agent_link) do
+    #   list_R = Agent.get(agent_link, fn map -> Map.get(map, :list) end)
+    #   # case list_R do
+    #   #   [] -> n_pid = nil;
+  
+    #   #   list_R -> n_pid = Enum.random(list_R); 
+    #   #       unless Process.alive?(n_pid) do
+    #   #         Agent.update(agent_link, fn(list) -> List.delete(list_R, n_pid) end);
+    #   #         list_RU = Agent.get(agent_link, fn(list) -> list end)
+    #   #         n_pid = get_random_neighbor(agent_link);
+    #   #     end
+    #   #   end
+    #     n_pid = Enum.random(list_R);
+    # end
+
     def get_random_neighbor(agent_link) do
       list_R = Agent.get(agent_link, fn map -> Map.get(map, :list) end)
-      # case list_R do
-      #   [] -> n_pid = nil;
-  
-      #   list_R -> n_pid = Enum.random(list_R); 
-      #       unless Process.alive?(n_pid) do
-      #         Agent.update(agent_link, fn(list) -> List.delete(list_R, n_pid) end);
-      #         list_RU = Agent.get(agent_link, fn(list) -> list end)
-      #         n_pid = get_random_neighbor(agent_link);
-      #     end
-      #   end
-        n_pid = Enum.random(list_R);
+      case list_R do
+        [] -> []
+        _ -> n_pid = Enum.random(list_R) 
+      end
+    end
+
+    def get_all_neighbors(agent_link) do
+      Agent.get(agent_link, fn map -> Map.get(map,:list) end);
+    end
+
+    def remove_neighbor(agent_link, n_pid) do
+      Agent.update(agent_link, fn map -> Map.put(map, :list, List.delete(Map.get(map, :list), n_pid)) end);
     end
     
     def get_count(agent_link) do
@@ -324,30 +379,33 @@ defmodule LineGossip do
       if agent_link == nil do
         {:ok, agent_link} = TwoDAgent.start_link
       end
-      count = TwoDAgent.get_count(agent_link)
-      if count < totRepeat do
         receive do
           {:add_neighbors, listOfPid} ->  TwoDAgent.add_neighbors(agent_link, listOfPid)
                                           startTwoDGossip(totRepeat, agent_link, main_pid);
     
-          {:gossip, ppid, message} ->  #IO.puts(List.to_string(:erlang.pid_to_list(ppid)) <> " --> " <> List.to_string(:erlang.pid_to_list(self())) <> " Count: #{count}");
-                                      neighborPid = TwoDAgent.get_random_neighbor(agent_link);
-                                      case neighborPid do
-                                         # nil -> send(main_pid, {:dead_process}); #Process.exit(self(), :normal);
-                                          _ ->   send(neighborPid, {:gossip, self(), message});
-                                                if count == 0 do
-                                                  spawn(__MODULE__, :spreadGossipPeriodically, [agent_link, self(), message, main_pid, totRepeat]);
-                                                end
-                                                TwoDAgent.add_count(agent_link)
-                                                startTwoDGossip(totRepeat, agent_link,  main_pid);
-                                      end
+          {:gossip, ppid, message} -> TwoDAgent.add_count(agent_link)
+                                      count = TwoDAgent.get_count(agent_link)
+                                      #IO.puts(List.to_string(:erlang.pid_to_list(ppid)) <> " --> " <> List.to_string(:erlang.pid_to_list(self())) <> " Count: #{count}");
+                                      if count < totRepeat do
+                                        neighborPid = TwoDAgent.get_random_neighbor(agent_link);
+                                        case neighborPid do
+                                            [] -> send(main_pid, {:dead_process});  Process.exit(self(), :kill);
+                                            _ ->   send(neighborPid, {:gossip, self(), message});
+                                                  if count == 1 do
+                                                    #send(main_pid, {:infected_once, self()});
+                                                    spawn(__MODULE__, :spreadGossipPeriodically, [agent_link, totRepeat, self(), message, main_pid]);
+                                                  end
+                                                  startTwoDGossip(totRepeat,agent_link, main_pid); 
+                                        end
+                                      else
+                                        neighbor_list = TwoDAgent.get_all_neighbors(agent_link)
+                                        if neighbor_list != [] do
+                                          Enum.each(neighbor_list, fn x -> send(x,{:remove_neighbor, self()}) end);
+                                        end
+                                        send(main_pid, {:dead_process});
+                                        doNothing;
+                                      end 
         end
-        else
-          send(main_pid, {:dead_process});
-          #IO.puts ("I am done gossiping PID: -- "<> List.to_string :erlang.pid_to_list(self()));
-          doNothing
-        end 
-      
     end
   
     # def startTwoDGossip(count, totRepeat, agent_link, main_pid) when count > totRepeat do
@@ -364,13 +422,13 @@ defmodule LineGossip do
     end
   
     def spreadGossipPeriodically(agent_link, ppid, message, main_pid, totRepeat) do
-      #Process.sleep(1);
+      Process.sleep(1);
       count = TwoDAgent.get_count(agent_link)
       if count < totRepeat do
         neighborPid = TwoDAgent.get_random_neighbor(agent_link);
             case neighborPid do
-                #nil -> send(main_pid, {:dead_process}); #Process.exit(self(), :normal);
-                _ ->   send(neighborPid, {:gossip, self(), message});
+              [] -> send(main_pid, {:dead_process});  Process.exit(self(), :kill);
+                _ ->   send(neighborPid, {:gossip, ppid, message});
                        spreadGossipPeriodically(agent_link, ppid, message, main_pid, totRepeat);
             end 
         
@@ -442,29 +500,36 @@ defmodule TwoDImpGossip do
       if agent_link == nil do
         {:ok, agent_link} = TwoDAgent.start_link 
       end
-      count = TwoDAgent.get_count(agent_link)
-      if count < totRepeat do
         receive do
           {:add_neighbors, listOfPid} -> #TwoDAgent.add_neighbors(agent_link, listOfPid);
                                         TwoDAgent.add_neighbors(agent_link, listOfPid); startTwoDGossip(totRepeat, agent_link,main_pid);
     
-          {:gossip, ppid, message} ->  #IO.puts(List.to_string(:erlang.pid_to_list(ppid)) <> " --> " <> List.to_string(:erlang.pid_to_list(self())) <> " Count: #{count}");
-                                      neighborPid = TwoDAgent.get_random_neighbor(agent_link);
-                                      case neighborPid do
-                                          #nil -> send(main_pid, {:dead_process}); #Process.exit(self(), :normal);
-                                          _ -> send(neighborPid, {:gossip, self(), message});
-                                                if count == 1 do
-                                                  spawn(__MODULE__, :spreadGossipPeriodically, [agent_link, totRepeat, self(), message,main_pid]);
-                                                end
-                                                TwoDAgent.add_count(agent_link)
-                                                startTwoDGossip(totRepeat,agent_link,main_pid);
-                                      end
-        end
-        else
-          send(main_pid, {:dead_process});
-          #IO.puts ("I am done gossiping PID: -- "<> List.to_string :erlang.pid_to_list(self()));
-          doNothing
-        end
+          {:gossip, ppid, message} ->  TwoDAgent.add_count(agent_link)
+                                      count = TwoDAgent.get_count(agent_link)
+                                      #IO.puts(List.to_string(:erlang.pid_to_list(ppid)) <> " --> " <> List.to_string(:erlang.pid_to_list(self())) <> " Count: #{count}");
+                                      
+                                      if count < totRepeat do
+                                        neighborPid = TwoDAgent.get_random_neighbor(agent_link);
+                                        case neighborPid do
+                                            [] -> send(main_pid, {:dead_process});  Process.exit(self(), :kill);
+                                            _ ->   send(neighborPid, {:gossip, self(), message});
+                                                  if count == 1 do
+                                                    #send(main_pid, {:infected_once, self()});
+                                                    spawn(__MODULE__, :spreadGossipPeriodically, [agent_link, totRepeat, self(), message, main_pid]);
+                                                  end
+                                                  startTwoDGossip(totRepeat,agent_link, main_pid); 
+                                        end
+                                      else
+                                        #IO.puts ("I am done gossiping PID: -- "<> List.to_string :erlang.pid_to_list(self()));
+                                        
+                                        neighbor_list = TwoDAgent.get_all_neighbors(agent_link)
+                                        if neighbor_list != [] do
+                                          Enum.each(neighbor_list, fn x -> send(x,{:remove_neighbor, self()}) end);
+                                        end
+                                        send(main_pid, {:dead_process});
+                                        doNothing;
+                                      end 
+        end        
       end 
     
   
@@ -482,13 +547,13 @@ defmodule TwoDImpGossip do
     end
 
     def spreadGossipPeriodically(agent_link, totRepeat, ppid, message,main_pid) do
-      #Process.sleep(1);
+      Process.sleep(1);
       count = TwoDAgent.get_count(agent_link)
       if count < totRepeat do
         neighborPid = TwoDAgent.get_random_neighbor(agent_link);
             case neighborPid do
-                #nil -> send(main_pid, {:dead_process}); #Process.exit(self(), :normal);
-                _ ->   send(neighborPid, {:gossip, self(), message});
+              [] -> send(main_pid, {:dead_process});  Process.exit(self(), :kill);
+                _ ->   send(neighborPid, {:gossip, ppid, message});
                         spreadGossipPeriodically(agent_link, totRepeat, ppid, message, main_pid);
             end 
       else

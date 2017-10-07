@@ -22,51 +22,67 @@ defmodule Project2.CLI do
                     sqRt = trunc(Float.ceil(:math.sqrt(String.to_integer(numOfNodes))));
                     map = TwoDGossip.spawn2DActors(String.to_integer(numOfNodes), totRepeat,0,0,sqRt, %{}, self);
                     TwoDGossip.setupNeighbors(map,0,0,sqRt);
-                    pid = map[0][0]
-            "2DImp" -> 
+                    pid = elem(Enum.random(elem(Enum.random(map),1)),1)
+            "imp2D" -> 
                     sqRt = trunc(Float.ceil(:math.sqrt(String.to_integer(numOfNodes))));
                     {map,listOfPids} = TwoDImpGossip.spawn2DActors(String.to_integer(numOfNodes),totRepeat, 0,0,sqRt, %{}, [], self);
                     TwoDImpGossip.setupNeighbors(map,0,0,sqRt, listOfPids);
-                    pid = map[0][0]
+                    pid = elem(Enum.random(elem(Enum.random(map),1)),1)
           end
           IO.puts(List.to_string(:erlang.pid_to_list(self())) <> " --> " <> List.to_string(:erlang.pid_to_list(pid)));
           send(pid, {:gossip, self(), "something"});
-          keepAwake(1, String.to_integer(numOfNodes), :os.system_time(:microsecond))
+          keepAwake(1, String.to_integer(numOfNodes), :os.system_time(:millisecond))
       "push-sum" -> 
         case topology do
-          "full" -> list = FullPSGossip.spawnFullActors(String.to_integer(numOfNodes), 0, 1, [], self());
+          "full" -> list = FullPS.spawnFullActors(String.to_integer(numOfNodes), 0, [], self());
                     for x <- 0..String.to_integer(numOfNodes)-1 do
                       newList = List.delete_at(list, x);
                       {pid, _} = List.pop_at(list, x);
                       send(pid, {:add_neighbors, newList});
                     end
-                    pid = List.first(list);
+                    pid = Enum.random(list);
+          "line" -> list = LinePS.spawnLineActors(String.to_integer(numOfNodes), 0, totRepeat, nil, self(), []);
+                    pid = Enum.random(list);
+
                    end
         send(pid, {:start_push_sum, self()});
-        keepAwakeForPushSum(1, String.to_integer(numOfNodes), :os.system_time(:microsecond), list)
+        keepAwakeForPushSum(1, String.to_integer(numOfNodes), :os.system_time(:microsecond), list, 0, 0)
         end
   end  
 
   def keepAwake(count, numOfNodes, startTime) do
-    if(count > numOfNodes) do
-      IO.puts (:os.system_time(:microsecond) - startTime);
+    #IO.inspect converged; IO.inspect count;
+    if(count >= numOfNodes * 0.75) do
+      IO.puts (:os.system_time(:millisecond) - startTime);
     else
       receive do
+        #{:infected_once, pid} -> keepAwake(count+1, numOfNodes, startTime, converged); 
         {:dead_process} -> keepAwake(count+1, numOfNodes, startTime); 
       end
     end
+    # if(topology != "line" && count >= numOfNodes) do
+    #   IO.puts (:os.system_time(:millisecond) - startTime);
+    # else
+    #   receive do
+    #     #{:infected_once, pid} -> keepAwake(count+1, numOfNodes, startTime, converged); 
+    #     {:dead_process} -> keepAwake(count+1, numOfNodes, startTime, topology); 
+    #   end
+    # end
   end
 
-  def keepAwakeForPushSum(count, numOfNodes, startTime, list) do
-    if(count > numOfNodes) do
+  def keepAwakeForPushSum(count, numOfNodes, startTime, list, s, w) do
+    if(count == numOfNodes) do
       IO.puts (:os.system_time(:microsecond) - startTime);
+      IO.puts "S: #{s} W: #{w} S/W: #{s/w}";
     else
       receive do
-        {:dead_process, pid} -> list = List.delete(list, pid);
-                                new_pid = Enum.random(list);
-                                send(new_pid, {:update_neighbors, List.delete(list, pid)})
-                                send(new_pid, {:start_push_sum, self()});
-                                keepAwake(count+1, numOfNodes, startTime); 
+        
+
+        {:dead_process, pid, sVal, wVal} -> #IO.puts "S: #{sVal} W: #{wVal} S/W: #{sVal/wWal}";  
+                                            list = List.delete(list, pid);
+                                            new_pid = Enum.random(list);
+                                            send(new_pid, {:start_push_sum, self()});
+                                            keepAwakeForPushSum(count+1, numOfNodes, startTime, list, s+sVal, w+wVal); 
       end
     end
   end
